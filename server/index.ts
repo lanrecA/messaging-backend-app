@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from './database';
 import dotenv from 'dotenv';
+import {ui_base_url} from "./constant";
 
 dotenv.config();
 
@@ -13,7 +14,7 @@ const app: Express = express();
 const server = createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: 'http://localhost:3000',
+        origin: `${ui_base_url}`,
         methods: ['GET', 'POST'],
     },
 });
