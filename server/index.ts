@@ -30,6 +30,58 @@ interface Message {
     timestamp: string;
 }
 
+interface SearchUser {
+    id: number;
+    first_name: string;
+    last_name: string;
+    contact_identifier: string;
+}
+
+interface AddContactRequestBody {
+    userId: number;
+    contactUserId: number;
+}
+
+interface ContactResponse {
+    id: number;
+    first_name: string;
+    last_name: string;
+    contact_identifier: string;
+    added_at: string;
+}
+
+
+app.post('/api/contacts', (req: Request<{}, {}, AddContactRequestBody>, res: Response) => {
+    const { userId, contactUserId } = req.body;
+
+    if (!userId || !contactUserId || typeof userId !== 'number' || typeof contactUserId !== 'number') {
+        return res.status(400).json({
+            error: 'Both userId and contactUserId are required and must be numbers'
+        });
+    }
+
+    if (userId === contactUserId) {
+        return res.status(400).json({ error: 'Cannot add yourself as a contact' });
+    }
+
+    db.run(
+        `INSERT OR IGNORE INTO contacts (user_id, contact_user_id) 
+     VALUES (?, ?)`,
+        [userId, contactUserId],
+        function (this: any, err: Error | null) {
+            if (err) {
+                console.error('Error adding contact:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+
+            res.status(201).json({
+                message: 'Contact added successfully',
+                contactId: contactUserId
+            });
+        }
+    );
+});
+
 // =======================
 // SIGN UP
 // =======================
@@ -64,6 +116,36 @@ app.post('/api/signup', async (req: Request, res: Response) => {
     } catch (err) {
         res.status(500).json({ error: 'Server error' });
     }
+});
+
+app.get('/api/contacts/:userId', (req: Request<{ userId: string }>, res: Response) => {
+    const { userId } = req.params;
+
+    const userIdNum = parseInt(userId, 10);
+    if (isNaN(userIdNum)) {
+        return res.status(400).json({ error: 'userId must be a valid number' });
+    }
+
+    db.all(
+        `SELECT 
+       u.id, 
+       u.first_name, 
+       u.last_name, 
+       u.contact_identifier,
+       c.added_at
+     FROM contacts c
+     JOIN users u ON c.contact_user_id = u.id
+     WHERE c.user_id = ?`,
+        [userIdNum],
+        (err: Error | null, rows: ContactResponse[]) => {
+            if (err) {
+                console.error('Error fetching contacts:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+
+            res.json(rows);
+        }
+    );
 });
 
 // =======================
@@ -131,40 +213,32 @@ interface UserSocket {
 }
 
 const userSockets: Map<string, string> = new Map(); // username → socket.id
-//
-// io.on('connection', (socket: Socket) => {
-//     console.log(`User connected: ${socket.id}`);
-//
-//     socket.on('set username', (username: string) => {
-//         if (!username) return socket.emit('error', 'Username required');
-//
-//         userSockets.set(username, socket.id);
-//         socket.join(username);
-//
-//         io.emit('user list', Array.from(userSockets.keys()));
-//     });
-//
-//     socket.on('chat message', (msg: string) => {
-//         const sender = Array.from(userSockets.entries()).find(([, id]) => id === socket.id)?.[0];
-//         if (!sender) return;
-//
-//         const messageData = {
-//             username: sender,
-//             text: msg,
-//             timestamp: new Date().toISOString(),
-//         };
-//
-//         io.emit('chat message', messageData);
-//     });
-//
-//     socket.on('disconnect', () => {
-//         const username = Array.from(userSockets.entries()).find(([, id]) => id === socket.id)?.[0];
-//         if (username) {
-//             userSockets.delete(username);
-//             io.emit('user list', Array.from(userSockets.keys()));
-//         }
-//     });
-// });
+
+app.get('/api/search-users', (req: Request, res: Response) => {
+    const { query } = req.query;
+
+    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+        return res.status(400).json({ error: 'Search query is required and must be a non-empty string' });
+    }
+
+    const searchTerm = `%${query.trim()}%`;
+
+    db.all(
+        `SELECT id, first_name, last_name, contact_identifier 
+     FROM users 
+     WHERE contact_identifier LIKE ? 
+     LIMIT 10`,
+        [searchTerm],
+        (err: Error | null, rows: SearchUser[]) => {
+            if (err) {
+                console.error('Database error in search-users:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+
+            res.json(rows);
+        }
+    );
+});
 
 // Helper to get username from socket.id
 function getUsernameFromSocket(socket: Socket): string | undefined {
